@@ -1,6 +1,8 @@
 # TrainCrewBrakingViewer
 
 TrainCrewBrakingViewer、溝月レイル/Acty様製作の列車運転ゲーム「TRAIN CREW」で動作する、ブレーキ目安曲線表示ソフトです。
+![1](https://github.com/user-attachments/assets/e30f7aaa-f44e-41bc-be62-577225fc9095)
+
 
 # 使い方
 1、TRAIN CREWの操作設定→外部デバイス入出力を「有効」に設定してください。
