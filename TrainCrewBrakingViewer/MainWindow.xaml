@@ -1,0 +1,23 @@
+﻿<Window x:Class="TrainCrewBrakingViewer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:wpf="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
+        mc:Ignorable="d"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ResizeMode="CanResizeWithGrip"
+        Cursor="Hand"
+        Title="MainWindow" Width="600" Height="400">
+    <Window.Background>
+        <SolidColorBrush>
+            <SolidColorBrush.Color>
+                <Color A="30" R="255" G="255" B="255" />
+            </SolidColorBrush.Color>
+        </SolidColorBrush>
+    </Window.Background>
+    <Grid>
+        <wpf:WpfPlot x:Name="WpfPlot1" IsHitTestVisible="False" />
+    </Grid>
+</Window>
