@@ -102,7 +102,7 @@ public partial class MainWindow : Window
 
         double maxAxisX = 1000;
         double speed = state.Speed;
-        var notch = Math.Max(state.Bnotch, 1);
+        var notch = (_tasc.IsTwoHandle) ? Math.Max(state.Bnotch, 1) : Math.Max(state.Bnotch - 1, 0);
 
         //運転画面遷移なら処理
         if (TrainCrewInput.gameState.gameScreen == GameScreen.MainGame
