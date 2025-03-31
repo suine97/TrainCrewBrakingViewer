@@ -136,7 +136,9 @@ public partial class MainWindow : Window
                 var dec = notchDist[i];
                 var func = new Func<double, double>(x =>
                 {
-                    var y = _tasc.CalcTASCStoppingReductionPattern(state.nextStaDistance - (float)x, dec);
+                    var y1 = _tasc.CalcTASCStoppingReductionPattern(state.nextStaDistance - (float)x, dec);
+                    var y2 = _tasc.CalcTASCLimitSpeedPattern(_tasc.strTargetLimitSpeed, _tasc.strTargetLimitDistance - (float)x, dec);
+                    var y = new[] { y1, y2 }.Min();
                     return double.IsNaN(y) ? 0 : y;
                 });
                 var functionPlot = _plot.Add.Function(func);

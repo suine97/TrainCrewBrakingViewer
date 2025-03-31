@@ -45,12 +45,12 @@ namespace TrainCrewBrakingViewer
         /// <summary>
         /// TASC 一時保存用目標制限速度
         /// </summary>
-        private float strTargetLimitSpeed = 0.0f;
+        public float strTargetLimitSpeed = 0.0f;
 
         /// <summary>
         /// TASC 一時保存用目標制限距離
         /// </summary>
-        private float strTargetLimitDistance = 0.0f;
+        public float strTargetLimitDistance = 0.0f;
 
         /// <summary>
         /// TASC 駅停車判定
@@ -519,26 +519,13 @@ namespace TrainCrewBrakingViewer
                 fTASCXmlLimitDistance = xmlLimitDistance;
             }
 
-            //TASC残距離取得用
-            int tascFixedPointDistance = 1000;
-            if (dist < 50) tascFixedPointDistance = 50;
-            else if (dist < 100) tascFixedPointDistance = 100;
-            else if (dist < 150) tascFixedPointDistance = 150;
-            else if (dist < 200) tascFixedPointDistance = 200;
-            else if (dist < 250) tascFixedPointDistance = 250;
-            else if (dist < 300) tascFixedPointDistance = 300;
-            else if (dist < 400) tascFixedPointDistance = 400;
-            else if (dist < 500) tascFixedPointDistance = 500;
-            else if (dist < 600) tascFixedPointDistance = 600;
-            else if (dist < 1000) tascFixedPointDistance = 1000;
-
             //TASC勾配平均値演算
             if (IsTASCEnable)
-                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, tascFixedPointDistance, 0.0f, fStopPositionOffset);
+                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, 1000.0f, 0.0f, fStopPositionOffset);
             else if (state.nextSpeedLimit >= 0.0f)
-                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, dist, dist - fTASCXmlLimitDistance, fStopPositionOffset);
+                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, dist, (dist - fTASCXmlLimitDistance), fStopPositionOffset);
             else
-                fTASCGradientAverage = CalcAverageGradientToRelativePosition(state, dist, 1000.0f, fStopPositionOffset);
+                fTASCGradientAverage = CalcAverageGradientToRelativePosition(state, dist, ((dist - 1000.0f) >= 0f ? (dist - 1000.0f) : 0f), fStopPositionOffset);
 
             //TASC速度制限パターン演算
             if (fTASCXmlLimitSpeed < state.speedLimit)
@@ -644,7 +631,7 @@ namespace TrainCrewBrakingViewer
         /// <param name="distance">制限速度までの残り距離[m]</param>
         /// <param name="deceleration">パターン減速度[km/h/s]</param>
         /// <returns></returns>
-        private float CalcTASCLimitSpeedPattern(float limitSpeed, float distance, float deceleration)
+        public float CalcTASCLimitSpeedPattern(float limitSpeed, float distance, float deceleration)
         {
             float dist = distance - fTASCDistanceOffset;
             float dec = deceleration;
