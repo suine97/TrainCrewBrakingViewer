@@ -519,9 +519,16 @@ namespace TrainCrewBrakingViewer
                 fTASCXmlLimitDistance = xmlLimitDistance;
             }
 
+            //TASC残距離取得用
+            int tascFixedPointDistance = 1000;
+            if (dist < 50) tascFixedPointDistance = 50;
+            else if (dist < 150) tascFixedPointDistance = 150;
+            else if (dist < 300) tascFixedPointDistance = 300;
+            else if (dist < 600) tascFixedPointDistance = 600;
+
             //TASC勾配平均値演算
             if (IsTASCEnable)
-                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, 1000.0f, 0.0f, fStopPositionOffset);
+                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, tascFixedPointDistance, 0.0f, fStopPositionOffset);
             else if (state.nextSpeedLimit >= 0.0f)
                 fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, dist, (dist - fTASCXmlLimitDistance), fStopPositionOffset);
             else

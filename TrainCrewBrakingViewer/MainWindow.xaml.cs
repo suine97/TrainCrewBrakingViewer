@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -18,6 +19,8 @@ public partial class MainWindow : Window
 {
     private Plot _plot;
     private readonly TASC _tasc;
+    private DateTime _lastUpdate = DateTime.MinValue;
+    private readonly TimeSpan _updateInterval = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
     /// コンストラクタ
@@ -72,15 +75,19 @@ public partial class MainWindow : Window
         };
 
         // レンダリングイベントで更新
-        CompositionTarget.Rendering += (_, _) =>
+        CompositionTarget.Rendering += async (_, _) =>
         {
-            try
+            if (DateTime.Now - _lastUpdate > _updateInterval)
             {
-                Update();
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"{ex}");
+                try
+                {
+                    await UpdateAsync();
+                    _lastUpdate = DateTime.Now;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{ex}");
+                }
             }
         };
     }
@@ -88,7 +95,7 @@ public partial class MainWindow : Window
     /// <summary>
     /// 更新メソッド
     /// </summary>
-    private void Update()
+    private async Task UpdateAsync()
     {
         // 今ある線を全部クリア
         _plot.Clear();
