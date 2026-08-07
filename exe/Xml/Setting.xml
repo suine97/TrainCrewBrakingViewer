@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Setting>
+	<!-- ウィンドウを透過するか (true / false)
+	     WPFは透過ウィンドウに対してGPU描画を無効化し、ウィンドウ全体をCPUで合成するため、
+	     描画負荷がウィンドウ面積に比例して増える。
+	     ウィンドウを大きくして重い場合は false にすると大幅に軽くなる(背景は不透明な暗色になる)。 -->
+	<Transparent>true</Transparent>
+
+	<!-- グラフの更新間隔[ms] (10〜1000)
+	     大きくすると軽くなるが、表示の追従が遅くなる。 -->
+	<UpdateIntervalMs>50</UpdateIntervalMs>
+
+	<!-- 減速曲線のサンプル点数 (16〜2048)
+	     減らすと軽くなるが、曲線が粗くなる。 -->
+	<CurveSampleCount>256</CurveSampleCount>
+</Setting>

@@ -1,12 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Diagnostics;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using ScottPlot;
+using ScottPlot.Plottables;
 using TrainCrew;
 using Color = ScottPlot.Color;
 
@@ -17,10 +16,70 @@ namespace TrainCrewBrakingViewer;
 /// </summary>
 public partial class MainWindow : Window
 {
-    private Plot _plot;
+    /// <summary>
+    /// 減速曲線の最大本数(TASC.constDeceleration の最大要素数)
+    /// </summary>
+    private const int MaxNotchCount = 8;
+
+    private readonly Plot _plot;
     private readonly TASC _tasc;
-    private DateTime _lastUpdate = DateTime.MinValue;
-    private readonly TimeSpan _updateInterval = TimeSpan.FromMilliseconds(50);
+    private readonly ViewerSetting _setting = ViewerSetting.Load();
+    private readonly DispatcherTimer _timer;
+
+    /// <summary>
+    /// 減速曲線のX座標(全曲線で共有)
+    /// </summary>
+    private readonly double[] _curveXs;
+
+    /// <summary>
+    /// 減速曲線のY座標(曲線ごと)
+    /// </summary>
+    private readonly double[][] _curveYs = new double[MaxNotchCount][];
+
+    /// <summary>
+    /// 減速曲線のプロット
+    /// </summary>
+    private readonly Scatter[] _curves = new Scatter[MaxNotchCount];
+
+    private readonly double[] _speedPointXs = { 0.0 };
+    private readonly double[] _speedPointYs = { 0.0 };
+    private readonly double[] _speedLineXs = { 0.0, 0.0 };
+    private readonly double[] _speedLineYs = { 0.0, 0.0 };
+
+    /// <summary>
+    /// 現在の速度を示す点
+    /// </summary>
+    private Scatter _speedPoint;
+
+    /// <summary>
+    /// 現在位置を示す縦線
+    /// </summary>
+    private Scatter _speedLine;
+
+    /// <summary>
+    /// 停目線
+    /// </summary>
+    private VerticalLine _stopPositionLine;
+
+    /// <summary>
+    /// 凡例を組んだときの車両形式
+    /// </summary>
+    private TASC.TrainModel _legendTrainModel = TASC.TrainModel.None;
+
+    /// <summary>
+    /// 凡例を組んだときのブレーキ方式
+    /// </summary>
+    private bool _legendIsSMEEBrake;
+
+    /// <summary>
+    /// 凡例を一度でも組んだか
+    /// </summary>
+    private bool _legendInitialized;
+
+    /// <summary>
+    /// 直前の更新で空のグラフを描画済みか
+    /// </summary>
+    private bool _blankRendered;
 
     /// <summary>
     /// コンストラクタ
@@ -29,8 +88,23 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // 透過設定(ウィンドウハンドル生成前に確定させる必要がある)
+        ApplyWindowTransparency();
+
         Topmost = true;
         _tasc = new TASC();
+
+        // 描画に使う配列を確保する(以降は中身を書き換えて使い回す)
+        _curveXs = new double[_setting.CurveSampleCount];
+        for (var i = 0; i < MaxNotchCount; i++)
+        {
+            _curveYs[i] = new double[_setting.CurveSampleCount];
+        }
+
+        _timer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromMilliseconds(_setting.UpdateIntervalMs)
+        };
 
         // ScottPlotの初期設定
         _plot = WpfPlot1.Plot;
@@ -51,6 +125,9 @@ public partial class MainWindow : Window
         _plot.Axes.Bottom.Label.OffsetY = -2;
         _plot.Axes.Bottom.Label.Text = "停止位置までの距離 [m]";
 
+        // 描画要素を一度だけ生成する(毎フレームの生成・破棄を避ける)
+        InitializePlottables();
+
         // TrainCrewInputの初期化
         TrainCrewInput.Init();
 
@@ -68,136 +145,243 @@ public partial class MainWindow : Window
                 var result = MessageBox.Show("グラフを閉じますか？", "確認", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (result == MessageBoxResult.Yes)
                 {
+                    _timer.Stop();
                     TrainCrewInput.Dispose();
                     Close();
                 }
             }
         };
 
-        // レンダリングイベントで更新
-        CompositionTarget.Rendering += async (_, _) =>
+        Closed += (_, _) => _timer.Stop();
+
+        // 一定間隔で更新する
+        // CompositionTarget.Rendering はハンドラを登録している間ウィンドウ全体の再合成を
+        // 毎フレーム走らせ続けるため、変化が無くても負荷がウィンドウ面積に比例して掛かる。
+        _timer.Tick += (_, _) =>
         {
-            if (DateTime.Now - _lastUpdate > _updateInterval)
+            try
             {
-                try
-                {
-                    await UpdateAsync();
-                    _lastUpdate = DateTime.Now;
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"{ex}");
-                }
+                Update();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{ex}");
             }
         };
+        _timer.Start();
+    }
+
+    /// <summary>
+    /// ウィンドウ透過設定の適用メソッド
+    /// </summary>
+    private void ApplyWindowTransparency()
+    {
+        AllowsTransparency = _setting.Transparent;
+
+        var background = _setting.Transparent
+            ? new SolidColorBrush(System.Windows.Media.Color.FromArgb(30, 255, 255, 255))
+            : new SolidColorBrush(System.Windows.Media.Color.FromRgb(16, 16, 16));
+        background.Freeze();
+
+        Background = background;
+    }
+
+    /// <summary>
+    /// 描画要素の生成メソッド
+    /// </summary>
+    /// <remarks>
+    /// 追加順で凡例の配色(パレット)が決まるため、順序は変更しない。
+    /// </remarks>
+    private void InitializePlottables()
+    {
+        // 停目線
+        _stopPositionLine = _plot.Add.VerticalLine(0.0);
+        _stopPositionLine.IsVisible = false;
+
+        // 減速曲線(最大本数ぶん生成し、車両形式に応じて表示・非表示を切り替える)
+        for (var i = 0; i < MaxNotchCount; i++)
+        {
+            _curves[i] = _plot.Add.Scatter(_curveXs, _curveYs[i]);
+            // マーカーを消して折れ線だけにする(Add.Function と同じ見た目にする)
+            _curves[i].MarkerSize = 0;
+            _curves[i].IsVisible = false;
+        }
+
+        // 現在の速度を示す点
+        _speedPoint = _plot.Add.Scatter(_speedPointXs, _speedPointYs, color: Color.FromHex("#FFA500"));
+        _speedPoint.IsVisible = false;
+
+        // 現在位置を示す縦線
+        _speedLine = _plot.Add.Scatter(_speedLineXs, _speedLineYs, color: Color.FromHex("#FFA500"));
+        _speedLine.IsVisible = false;
     }
 
     /// <summary>
     /// 更新メソッド
     /// </summary>
-    private async Task UpdateAsync()
+    private void Update()
     {
-        // 今ある線を全部クリア
-        _plot.Clear();
-
         // TrainCrew情報取得
         var state = TrainCrewInput.GetTrainState();
         TrainCrewInput.RequestStaData();
         if (state == null || state.CarStates.Count == 0 || state.stationList.Count == 0) { return; }
-        try { var dataCheck = state.stationList[state.nowStaIndex].Name; }
-        catch { return; }
+        if (state.nowStaIndex < 0 || state.nowStaIndex >= state.stationList.Count) { return; }
 
-        double maxAxisX = 1000;
+        //運転画面遷移でなければ描画をクリアする
+        if (TrainCrewInput.gameState.gameScreen != GameScreen.MainGame
+            && TrainCrewInput.gameState.gameScreen != GameScreen.MainGame_Pause
+            && TrainCrewInput.gameState.gameScreen != GameScreen.MainGame_Loading)
+        {
+            RenderBlank();
+            return;
+        }
+
+        //信号機情報取得
+        var strSignal = TrainCrewInput.signals;
+        var signalName = (strSignal.Count > 0) ? strSignal[0].name : "None";
+
+        // TASC演算
+        _tasc.TASC_Update(state, signalName);
+
         double speed = state.Speed;
         var notch = (_tasc.IsTwoHandle) ? Math.Max(state.Bnotch, 1) : Math.Max(state.Bnotch - 1, 0);
 
-        //運転画面遷移なら処理
-        if (TrainCrewInput.gameState.gameScreen == GameScreen.MainGame
-            || TrainCrewInput.gameState.gameScreen == GameScreen.MainGame_Pause
-            || TrainCrewInput.gameState.gameScreen == GameScreen.MainGame_Loading)
+        //勾配値算出
+        float gradientDec = _tasc.fTASCGradientAverage.IsZero() ? 0.0f : (_tasc.fTASCGradientAverage / _tasc.iGradientCoefficient);
+
+        // プロットの描画範囲を先に決める(減速曲線のサンプリング範囲に使うため)
+        double maxAxisX = state.nextStaDistance switch
         {
-            //信号機情報取得
-            var strSignal = TrainCrewInput.signals;
-            var signalName = (strSignal.Count > 0) ? strSignal[0].name : "None";
-
-            // TASC演算
-            _tasc.TASC_Update(state, signalName);
-
-            //勾配値算出
-            float gradientDec = _tasc.fTASCGradientAverage.IsZero() ? 0.0f : (_tasc.fTASCGradientAverage / _tasc.iGradientCoefficient);
-
-            //減速度[km/h/s]に変換した配列を生成
-            float[] strCoinstDeceration = _tasc.constDeceleration[(int)_tasc.trainModel];
-            List<float> notchDist = strCoinstDeceration.Select(i => i * _tasc.maxDeceleration[(int)_tasc.trainModel] + gradientDec).ToList();
-
-            // 停目線を引く
-            if (state.nextStopType is "停車" or "運転停車")
-            {
-                _plot.Add.VerticalLine(state.nextStaDistance);
-                maxAxisX = state.nextStaDistance;
-            }
-
-            // 減速曲線を引く
-            for (var i = 0; i < notchDist.Count; i++)
-            {
-                var dec = notchDist[i];
-                var func = new Func<double, double>(x =>
-                {
-                    var y1 = _tasc.CalcTASCStoppingReductionPattern(state.nextStaDistance - (float)x, dec);
-                    var y2 = _tasc.CalcTASCLimitSpeedPattern(_tasc.strTargetLimitSpeed, _tasc.strTargetLimitDistance - (float)x, dec);
-                    var y = new[] { y1, y2 }.Min();
-                    return double.IsNaN(y) ? 0 : y;
-                });
-                var functionPlot = _plot.Add.Function(func);
-                functionPlot.LineWidth = notch == i + 1 ? 5 : 2;
-                // ブレーキノッチ表示
-                if (_tasc.IsSMEEBrake)
-                    functionPlot.LegendText = $"B-{(i + 1) * 50}kPa";
-                else
-                    functionPlot.LegendText = $"B{i + 1}";
-            }
-
-            // 現在の速度に点を描画
-            _plot.Add.Scatter(0, speed, color: Color.FromHex("#FFA500"));
-            // 現在位置に縦線を引く
-            _plot.Add.Scatter(new[] { 0, 0 }, new[] { 0, speed }, color: Color.FromHex("#FFA500"));
-
-            switch (state.nextStaDistance)
-            {
-                case <= 24:
-                    maxAxisX = 25;
-                    break;
-                case < 950:
-                    maxAxisX = state.nextStaDistance * 1.05;
-                    break;
-                default:
-                    maxAxisX = 1000;
-                    break;
-            }
-            double maxAxisY;
-            switch (speed)
-            {
-                case <= 21:
-                    maxAxisY = 25;
-                    break;
-                case < 120:
-                    maxAxisY = speed * 1.20;
-                    break;
-                default:
-                    maxAxisY = 120;
-                    break;
-            }
-
-            // プロットの描画範囲を設定
-            var minAxisX = -(maxAxisX / 5);
-            _plot.Axes.SetLimits(minAxisX, maxAxisX, 0, maxAxisY);
-            WpfPlot1.Refresh();
-        }
-        else
+            <= 24 => 25.0,
+            < 950 => state.nextStaDistance * 1.05,
+            _ => 1000.0,
+        };
+        double maxAxisY = speed switch
         {
-            // プロットの描画をクリア
-            _plot.Clear();
-            WpfPlot1.Refresh();
+            <= 21 => 25.0,
+            < 120 => speed * 1.20,
+            _ => 120.0,
+        };
+        double minAxisX = -(maxAxisX / 5);
+
+        // 停目線を引く
+        bool isStopStation = state.nextStopType is "停車" or "運転停車";
+        _stopPositionLine.IsVisible = isStopStation;
+        if (isStopStation) _stopPositionLine.X = state.nextStaDistance;
+
+        //減速度[km/h/s]に変換するための係数を取得
+        float[] constDeceleration = _tasc.constDeceleration[(int)_tasc.trainModel];
+        float maxDeceleration = _tasc.maxDeceleration[(int)_tasc.trainModel];
+        int notchCount = Math.Min(constDeceleration.Length, MaxNotchCount);
+
+        // 車両形式が変わったときだけ凡例と曲線本数を組み直す
+        UpdateCurveLegend(notchCount);
+
+        // 減速曲線を引く
+        // Add.Function はプロット幅のピクセル数だけ関数を評価するためウィンドウ幅に比例して重くなる。
+        // 曲線は滑らかな平方根カーブなので、固定点数でサンプリングして折れ線として描く。
+        int sampleCount = _curveXs.Length;
+        double sampleStep = (maxAxisX - minAxisX) / (sampleCount - 1);
+        for (var j = 0; j < sampleCount; j++)
+        {
+            _curveXs[j] = minAxisX + sampleStep * j;
         }
+
+        for (var i = 0; i < notchCount; i++)
+        {
+            float dec = constDeceleration[i] * maxDeceleration + gradientDec;
+            double[] ys = _curveYs[i];
+
+            for (var j = 0; j < sampleCount; j++)
+            {
+                var x = (float)_curveXs[j];
+                var y1 = _tasc.CalcTASCStoppingReductionPattern(state.nextStaDistance - x, dec);
+                var y2 = _tasc.CalcTASCLimitSpeedPattern(_tasc.strTargetLimitSpeed, _tasc.strTargetLimitDistance - x, dec);
+
+                // NaNは除外して小さい方を採る(Enumerable.Min と同じ扱い)
+                float y;
+                if (float.IsNaN(y1)) y = y2;
+                else if (float.IsNaN(y2)) y = y1;
+                else y = Math.Min(y1, y2);
+
+                ys[j] = float.IsNaN(y) ? 0.0 : y;
+            }
+
+            _curves[i].LineWidth = notch == i + 1 ? 5 : 2;
+        }
+
+        // 現在の速度に点を描画
+        _speedPointYs[0] = speed;
+        _speedPoint.IsVisible = true;
+
+        // 現在位置に縦線を引く
+        _speedLineYs[1] = speed;
+        _speedLine.IsVisible = true;
+
+        // プロットの描画範囲を設定
+        _plot.Axes.SetLimits(minAxisX, maxAxisX, 0, maxAxisY);
+        WpfPlot1.Refresh();
+        _blankRendered = false;
+    }
+
+    /// <summary>
+    /// 凡例・曲線本数の更新メソッド
+    /// </summary>
+    /// <param name="notchCount">減速曲線の本数</param>
+    /// <remarks>
+    /// 凡例テキストを毎フレーム作り直すと凡例レイアウトとテキスト計測が毎回やり直しになるため、
+    /// 車両形式かブレーキ方式が変わったときだけ組み直す。
+    /// </remarks>
+    private void UpdateCurveLegend(int notchCount)
+    {
+        if (_legendInitialized
+            && _legendTrainModel == _tasc.trainModel
+            && _legendIsSMEEBrake == _tasc.IsSMEEBrake)
+        {
+            return;
+        }
+
+        for (var i = 0; i < MaxNotchCount; i++)
+        {
+            bool isUsed = i < notchCount;
+            _curves[i].IsVisible = isUsed;
+            // ブレーキノッチ表示
+            if (!isUsed)
+                _curves[i].LegendText = string.Empty;
+            else if (_tasc.IsSMEEBrake)
+                _curves[i].LegendText = $"B-{(i + 1) * 50}kPa";
+            else
+                _curves[i].LegendText = $"B{i + 1}";
+        }
+
+        _legendTrainModel = _tasc.trainModel;
+        _legendIsSMEEBrake = _tasc.IsSMEEBrake;
+        _legendInitialized = true;
+    }
+
+    /// <summary>
+    /// 空グラフ描画メソッド
+    /// </summary>
+    /// <remarks>
+    /// 既に空を描画済みなら再描画しない(運転画面外で描き直し続けるのを防ぐ)。
+    /// </remarks>
+    private void RenderBlank()
+    {
+        if (_blankRendered) return;
+
+        _stopPositionLine.IsVisible = false;
+        _speedPoint.IsVisible = false;
+        _speedLine.IsVisible = false;
+        for (var i = 0; i < MaxNotchCount; i++)
+        {
+            _curves[i].IsVisible = false;
+            _curves[i].LegendText = string.Empty;
+        }
+
+        // 運転画面に戻ったときに曲線の表示と凡例を組み直させる
+        _legendInitialized = false;
+
+        WpfPlot1.Refresh();
+        _blankRendered = true;
     }
 }
