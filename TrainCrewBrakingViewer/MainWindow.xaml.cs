@@ -21,6 +21,11 @@ public partial class MainWindow : Window
     /// </summary>
     private const int MaxNotchCount = 8;
 
+    /// <summary>
+    /// 横軸ラベル
+    /// </summary>
+    private const string BottomAxisLabel = "停止位置までの距離 [m]";
+
     private readonly Plot _plot;
     private readonly TASC _tasc;
     private readonly ViewerSetting _setting = ViewerSetting.Load();
@@ -88,6 +93,11 @@ public partial class MainWindow : Window
     private bool _blankRendered;
 
     /// <summary>
+    /// 横軸ラベルに併記中の注記
+    /// </summary>
+    private string _axisLabelNote;
+
+    /// <summary>
     /// コンストラクタ
     /// </summary>
     public MainWindow()
@@ -129,7 +139,7 @@ public partial class MainWindow : Window
         _plot.Axes.Bottom.Label.ForeColor = Color.FromHex("#DCDCDC");
         _plot.Axes.Bottom.Label.FontSize = 12;
         _plot.Axes.Bottom.Label.OffsetY = -2;
-        _plot.Axes.Bottom.Label.Text = "停止位置までの距離 [m]";
+        _plot.Axes.Bottom.Label.Text = BottomAxisLabel;
 
         // 描画要素を一度だけ生成する(毎フレームの生成・破棄を避ける)
         InitializePlottables();
@@ -289,6 +299,9 @@ public partial class MainWindow : Window
         var curveSet = _curveRepository.Current;
         bool useBinCurve = curveSet != null && curveSet.Matches(state.nextStaName, directionKey, trainModelIndex);
 
+        // binが使われていないときは理由が分かるように軸ラベルへ出す
+        UpdateAxisLabel(useBinCurve ? null : _curveRepository.Status);
+
         // 減速曲線を引く
         // Add.Function はプロット幅のピクセル数だけ関数を評価するためウィンドウ幅に比例して重くなる。
         // 曲線は滑らかな平方根カーブなので、固定点数でサンプリングして折れ線として描く。
@@ -343,6 +356,23 @@ public partial class MainWindow : Window
         _plot.Axes.SetLimits(minAxisX, maxAxisX, 0, maxAxisY);
         WpfPlot1.Refresh();
         _blankRendered = false;
+    }
+
+    /// <summary>
+    /// 横軸ラベルの更新メソッド
+    /// </summary>
+    /// <param name="note">併記する注記(不要ならnull)</param>
+    /// <remarks>
+    /// ラベルの再設定はテキスト計測をやり直させるため、内容が変わったときだけ設定する。
+    /// </remarks>
+    private void UpdateAxisLabel(string note)
+    {
+        if (string.Equals(_axisLabelNote, note, StringComparison.Ordinal)) return;
+
+        _axisLabelNote = note;
+        _plot.Axes.Bottom.Label.Text = string.IsNullOrEmpty(note)
+            ? BottomAxisLabel
+            : $"{BottomAxisLabel}  ({note})";
     }
 
     /// <summary>

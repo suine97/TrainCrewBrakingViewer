@@ -232,9 +232,38 @@ namespace TrainCrewBrakingViewer
         private BrakingCurveSet current;
 
         /// <summary>
+        /// 読み込み状況
+        /// </summary>
+        private string status = "bin未要求";
+
+        /// <summary>
         /// 読み込み済みの曲線
         /// </summary>
         public BrakingCurveSet Current => Volatile.Read(ref current);
+
+        /// <summary>
+        /// 読み込み状況(binが使われない原因の切り分け用)
+        /// </summary>
+        public string Status => Volatile.Read(ref status);
+
+        /// <summary>
+        /// ブレーキ曲線データのファイルパス解決メソッド
+        /// </summary>
+        /// <param name="stationName">駅名</param>
+        /// <returns>存在するファイルのパス(見つからなければnull)</returns>
+        /// <remarks>
+        /// カレントディレクトリは起動方法によって変わるため、まずexeの位置を基準に探す。
+        /// </remarks>
+        private static string ResolveFilePath(string stationName)
+        {
+            string fileName = stationName + ".bin";
+
+            string path = Path.Combine(AppContext.BaseDirectory, DirectoryName, fileName);
+            if (File.Exists(path)) return path;
+
+            path = Path.Combine(DirectoryName, fileName);
+            return File.Exists(path) ? path : null;
+        }
 
         /// <summary>
         /// 曲線の読み込み要求メソッド
@@ -259,18 +288,32 @@ namespace TrainCrewBrakingViewer
                 attemptedTrainModelIndex = trainModelIndex;
             }
 
+            Volatile.Write(ref status, $"bin読込中: {stationName}");
+
             Task.Run(() =>
             {
                 try
                 {
-                    string path = Path.Combine(DirectoryName, stationName + ".bin");
-                    if (!File.Exists(path)) return;
+                    string path = ResolveFilePath(stationName);
+                    if (path == null)
+                    {
+                        Volatile.Write(ref status, $"bin無し: {Path.Combine(DirectoryName, stationName + ".bin")}");
+                        return;
+                    }
 
                     var set = BrakingCurveSet.Load(path, stationName, directionKey, trainModelIndex);
-                    if (set != null) Volatile.Write(ref current, set);
+                    if (set == null)
+                    {
+                        Volatile.Write(ref status, $"bin該当データ無し: {stationName} 方向{directionKey} 形式{trainModelIndex}");
+                        return;
+                    }
+
+                    Volatile.Write(ref current, set);
+                    Volatile.Write(ref status, $"bin読込済: {stationName} 方向{directionKey} 形式{trainModelIndex}");
                 }
                 catch (Exception ex)
                 {
+                    Volatile.Write(ref status, $"bin読込失敗: {ex.GetType().Name} {ex.Message}");
                     Debug.WriteLine($"{ex}");
                 }
             });
