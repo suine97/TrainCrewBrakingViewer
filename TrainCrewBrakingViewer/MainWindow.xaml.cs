@@ -251,9 +251,6 @@ public partial class MainWindow : Window
         double speed = state.Speed;
         var notch = (_tasc.IsTwoHandle) ? Math.Max(state.Bnotch, 1) : Math.Max(state.Bnotch - 1, 0);
 
-        //勾配値算出
-        float gradientDec = _tasc.fTASCGradientAverage.IsZero() ? 0.0f : (_tasc.fTASCGradientAverage / _tasc.iGradientCoefficient);
-
         // プロットの描画範囲を先に決める(減速曲線のサンプリング範囲に使うため)
         double maxAxisX = state.nextStaDistance switch
         {
@@ -294,7 +291,7 @@ public partial class MainWindow : Window
 
         for (var i = 0; i < notchCount; i++)
         {
-            float dec = constDeceleration[i] * maxDeceleration + gradientDec;
+            float dec = constDeceleration[i] * maxDeceleration;
             double[] ys = _curveYs[i];
 
             for (var j = 0; j < sampleCount; j++)
