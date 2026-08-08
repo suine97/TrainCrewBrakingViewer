@@ -361,5 +361,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-# ブレーキ曲線データ(上の [Bb]in/ で除外されないようにする)
-!exe/Bin/
+# ブレーキ曲線データ(exe\Bin\*.bin)はローカル管理とし、コミットしない
+# (上の [Bb]in/ で除外される)
