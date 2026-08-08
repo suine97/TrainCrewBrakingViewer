@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private readonly Plot _plot;
     private readonly TASC _tasc;
     private readonly ViewerSetting _setting = ViewerSetting.Load();
+    private readonly BrakingCurveRepository _curveRepository = new BrakingCurveRepository();
     private readonly DispatcherTimer _timer;
 
     /// <summary>
@@ -279,6 +280,15 @@ public partial class MainWindow : Window
         // 車両形式が変わったときだけ凡例と曲線本数を組み直す
         UpdateCurveLegend(notchCount);
 
+        // 勾配を織り込み済みのブレーキ曲線を要求する(駅・方向・形式が変わったときだけ読み込まれる)
+        int trainModelIndex = (int)_tasc.trainModel;
+        int directionKey = _tasc.GetDirectionKey(state);
+        _curveRepository.Request(state.nextStaName, directionKey, trainModelIndex);
+
+        // 読み込めていればbinのデータを使い、無ければ従来の演算で描く
+        var curveSet = _curveRepository.Current;
+        bool useBinCurve = curveSet != null && curveSet.Matches(state.nextStaName, directionKey, trainModelIndex);
+
         // 減速曲線を引く
         // Add.Function はプロット幅のピクセル数だけ関数を評価するためウィンドウ幅に比例して重くなる。
         // 曲線は滑らかな平方根カーブなので、固定点数でサンプリングして折れ線として描く。
@@ -294,10 +304,19 @@ public partial class MainWindow : Window
             float dec = constDeceleration[i] * maxDeceleration;
             double[] ys = _curveYs[i];
 
+            // binのノッチキーは TrainState.Bnotch と同じ値
+            int bnotch = _tasc.IsTwoHandle ? i + 1 : i + 2;
+
             for (var j = 0; j < sampleCount; j++)
             {
                 var x = (float)_curveXs[j];
-                var y1 = _tasc.CalcTASCStoppingReductionPattern(state.nextStaDistance - x, dec);
+                var distance = state.nextStaDistance - x;
+
+                // 停車パターン
+                float y1 = 0.0f;
+                if (!useBinCurve || !curveSet.TryGetSpeed(bnotch, distance, out y1))
+                    y1 = _tasc.CalcTASCStoppingReductionPattern(distance, dec);
+
                 var y2 = _tasc.CalcTASCLimitSpeedPattern(_tasc.strTargetLimitSpeed, _tasc.strTargetLimitDistance - x, dec);
 
                 // NaNは除外して小さい方を採る(Enumerable.Min と同じ扱い)

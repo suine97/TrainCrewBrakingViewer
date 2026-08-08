@@ -628,6 +628,16 @@ namespace TrainCrewBrakingViewer
         }
 
         /// <summary>
+        /// 進行方向キー取得メソッド
+        /// </summary>
+        /// <param name="_state">列車の状態</param>
+        /// <returns>ブレーキ曲線データの方向キー(0=下り, 1=上り)</returns>
+        public int GetDirectionKey(TrainState _state)
+        {
+            return (GetDirection(_state) == "上り") ? 1 : 0;
+        }
+
+        /// <summary>
         /// 進行方向取得メソッド
         /// </summary>
         /// <param name="_state">列車の状態</param>
