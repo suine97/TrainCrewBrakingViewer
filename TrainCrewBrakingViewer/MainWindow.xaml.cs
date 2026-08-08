@@ -62,6 +62,11 @@ public partial class MainWindow : Window
     private VerticalLine _stopPositionLine;
 
     /// <summary>
+    /// 減速曲線の凡例テキスト
+    /// </summary>
+    private readonly string[] _legendTexts = new string[MaxNotchCount];
+
+    /// <summary>
     /// 凡例を組んだときの車両形式
     /// </summary>
     private TASC.TrainModel _legendTrainModel = TASC.TrainModel.None;
@@ -329,34 +334,33 @@ public partial class MainWindow : Window
     /// </summary>
     /// <param name="notchCount">減速曲線の本数</param>
     /// <remarks>
-    /// 凡例テキストを毎フレーム作り直すと凡例レイアウトとテキスト計測が毎回やり直しになるため、
-    /// 車両形式かブレーキ方式が変わったときだけ組み直す。
+    /// ScottPlotの凡例は描画時に各Plottableの LegendText と IsVisible を読むため、
+    /// この2つは毎回設定する。文字列の生成だけを車両形式ごとにキャッシュする。
     /// </remarks>
     private void UpdateCurveLegend(int notchCount)
     {
-        if (_legendInitialized
-            && _legendTrainModel == _tasc.trainModel
-            && _legendIsSMEEBrake == _tasc.IsSMEEBrake)
+        // 凡例テキストの生成は車両形式かブレーキ方式が変わったときだけ行う
+        if (!_legendInitialized
+            || _legendTrainModel != _tasc.trainModel
+            || _legendIsSMEEBrake != _tasc.IsSMEEBrake)
         {
-            return;
+            for (var i = 0; i < MaxNotchCount; i++)
+            {
+                // ブレーキノッチ表示
+                _legendTexts[i] = _tasc.IsSMEEBrake ? $"B-{(i + 1) * 50}kPa" : $"B{i + 1}";
+            }
+
+            _legendTrainModel = _tasc.trainModel;
+            _legendIsSMEEBrake = _tasc.IsSMEEBrake;
+            _legendInitialized = true;
         }
 
         for (var i = 0; i < MaxNotchCount; i++)
         {
             bool isUsed = i < notchCount;
             _curves[i].IsVisible = isUsed;
-            // ブレーキノッチ表示
-            if (!isUsed)
-                _curves[i].LegendText = string.Empty;
-            else if (_tasc.IsSMEEBrake)
-                _curves[i].LegendText = $"B-{(i + 1) * 50}kPa";
-            else
-                _curves[i].LegendText = $"B{i + 1}";
+            _curves[i].LegendText = isUsed ? _legendTexts[i] : string.Empty;
         }
-
-        _legendTrainModel = _tasc.trainModel;
-        _legendIsSMEEBrake = _tasc.IsSMEEBrake;
-        _legendInitialized = true;
     }
 
     /// <summary>
@@ -377,9 +381,6 @@ public partial class MainWindow : Window
             _curves[i].IsVisible = false;
             _curves[i].LegendText = string.Empty;
         }
-
-        // 運転画面に戻ったときに曲線の表示と凡例を組み直させる
-        _legendInitialized = false;
 
         WpfPlot1.Refresh();
         _blankRendered = true;
