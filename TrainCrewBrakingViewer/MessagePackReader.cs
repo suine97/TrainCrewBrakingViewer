@@ -25,6 +25,15 @@ namespace TrainCrewBrakingViewer
         }
 
         /// <summary>
+        /// 次の要素が配列かどうかの判定メソッド(読み込み位置は進めない)
+        /// </summary>
+        public bool IsNextArray()
+        {
+            byte code = buffer[position];
+            return (code >= 0x90 && code <= 0x9f) || code == 0xdc || code == 0xdd;
+        }
+
+        /// <summary>
         /// マップの要素数読み込みメソッド
         /// </summary>
         public int ReadMapHeader()
