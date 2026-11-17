@@ -125,11 +125,6 @@ namespace TrainCrewBrakingViewer
         public float fTASCSAPPressure = 0.0f;
 
         /// <summary>
-        /// TASC 平均勾配値(‰)
-        /// </summary>
-        public float fTASCGradientAverage = 0.0f;
-
-        /// <summary>
         /// TASC 制動待機距離[m]
         /// </summary>
         public float fTASCStandbyBreakingDistance = 700.0f;
@@ -148,11 +143,6 @@ namespace TrainCrewBrakingViewer
         /// SAP圧リセット判定
         /// </summary>
         public bool IsSAPReset = false;
-
-        /// <summary>
-        /// 勾配係数
-        /// </summary>
-        public readonly int iGradientCoefficient = 35;
 
         /// <summary>
         /// 停止位置範囲
@@ -275,9 +265,19 @@ namespace TrainCrewBrakingViewer
         private List<MaxSpeedClass> MaxSpeedList;
 
         /// <summary>
-        /// Xml 勾配情報
+        /// 進行方向判定用の数字以外除去パターン
         /// </summary>
-        private List<GradientClass> GradientList;
+        private static readonly Regex NonDigitRegex = new Regex(@"[^0-9]");
+
+        /// <summary>
+        /// 進行方向を判定した列車番号
+        /// </summary>
+        private string cachedDiaName = null;
+
+        /// <summary>
+        /// 判定済みの進行方向
+        /// </summary>
+        private string cachedDirection = "下り";
 
         /// <summary>
         /// Xml 速度制限情報
@@ -300,14 +300,6 @@ namespace TrainCrewBrakingViewer
         public TASC()
         {
             //Xmlファイル読み込み
-            GradientList = LoadXmlData(@"Xml\Gradient.xml", element => new GradientClass
-            {
-                Direction = element.Element("Direction").Value,
-                StationName = element.Element("StationName").Value,
-                Distance = float.Parse(element.Element("Distance").Value),
-                Gradient = float.Parse(element.Element("Gradient").Value)
-            });
-
             MaxSpeedList = LoadXmlData(@"Xml\MaxSpeed.xml", element => new MaxSpeedClass
             {
                 Direction = element.Element("Direction").Value,
@@ -475,7 +467,6 @@ namespace TrainCrewBrakingViewer
                 fTASCDeceleration = 0.0f;
                 fTASCXmlLimitSpeed = 0.0f;
                 fTASCXmlLimitDistance = 0.0f;
-                fTASCGradientAverage = 0.0f;
                 fTASCStoppingPattern = 0.0f;
                 fTASCStoppingReductionPattern = 0.0f;
                 fTASCStandbyBreakingDistance = 700.0f;
@@ -518,21 +509,6 @@ namespace TrainCrewBrakingViewer
                 fTASCXmlLimitSpeed = xmlLimitSpeed;
                 fTASCXmlLimitDistance = xmlLimitDistance;
             }
-
-            //TASC残距離取得用
-            int tascFixedPointDistance = 1000;
-            if (dist < 50) tascFixedPointDistance = 50;
-            else if (dist < 150) tascFixedPointDistance = 150;
-            else if (dist < 300) tascFixedPointDistance = 300;
-            else if (dist < 600) tascFixedPointDistance = 600;
-
-            //TASC勾配平均値演算
-            if (IsTASCEnable)
-                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, tascFixedPointDistance, 0.0f, fStopPositionOffset);
-            else if (state.nextSpeedLimit >= 0.0f)
-                fTASCGradientAverage = CalcAverageGradientToAbsolutePosition(state, dist, (dist - fTASCXmlLimitDistance), fStopPositionOffset);
-            else
-                fTASCGradientAverage = CalcAverageGradientToRelativePosition(state, dist, ((dist - 1000.0f) >= 0f ? (dist - 1000.0f) : 0f), fStopPositionOffset);
 
             //TASC速度制限パターン演算
             if (fTASCXmlLimitSpeed < state.speedLimit)
@@ -603,7 +579,6 @@ namespace TrainCrewBrakingViewer
             float dec = deceleration;
             float time = freeRunningTime[(int)trainModel];
             if (dist < 0.0f) dist = 0.0f;
-            if (!fTASCGradientAverage.IsZero()) dec += (fTASCGradientAverage / iGradientCoefficient);
 
             //停車パターン演算
             float v = (-2.0f * dec * time + (float)Math.Sqrt((float)Math.Pow(2.0f * dec * time, 2) - 4 * (-7.2 * dec * dist))) / 2;
@@ -623,7 +598,6 @@ namespace TrainCrewBrakingViewer
             float dec = deceleration;
             float time = freeRunningTime[(int)trainModel];
             if (dist < 0.0f) dist = 0.0f;
-            if (!fTASCGradientAverage.IsZero()) dec += (fTASCGradientAverage / iGradientCoefficient);
 
             //軽減パターン演算
             float v = (-2.0f * dec * time + (float)Math.Sqrt((float)Math.Pow(2.0f * dec * time, 2) - 4 * (-7.2 * dec * dist))) / 2;
@@ -644,7 +618,6 @@ namespace TrainCrewBrakingViewer
             float dec = deceleration;
             float time = freeRunningTime[(int)trainModel];
             if (dist < 0.0f) dist = 0.0f;
-            if (!fTASCGradientAverage.IsZero()) dec += (fTASCGradientAverage / iGradientCoefficient);
 
             //速度制限パターン演算
             float v = -time * dec + (float)Math.Sqrt((float)Math.Pow(time, 2) * (float)Math.Pow(dec, 2) + (float)Math.Pow(limitSpeed, 2) + 7.2f * dec * dist);
@@ -655,71 +628,28 @@ namespace TrainCrewBrakingViewer
         }
 
         /// <summary>
-        /// 現在位置から相対位置までの区間における勾配平均値を計算するメソッド
+        /// 進行方向キー取得メソッド
         /// </summary>
         /// <param name="_state">列車の状態</param>
-        /// <param name="distance">現在位置の距離[m]</param>
-        /// <param name="targetDistance">目標位置までの相対距離[m]</param>
-        /// <param name="offset">距離オフセット[m]</param>
-        /// <returns></returns>
-        private float CalcAverageGradientToRelativePosition(TrainState _state, float distance, float targetDistance, float offset)
+        /// <returns>ブレーキ曲線データの方向キー(0=下り, 1=上り)</returns>
+        public int GetDirectionKey(TrainState _state)
         {
-            string direction = data.IsEven(int.Parse(Regex.Replace(_state.diaName, @"[^0-9]", ""))) ? "上り" : "下り";
-            float average = 0.0f;
-            float startDist = Math.Max(distance, 0.0f);
-            float endDist = Math.Max(distance - targetDistance, 0.0f);
-
-            // 開始距離が終了距離を超えている場合、入れ替え
-            if (startDist > endDist) (endDist, startDist) = (startDist, endDist);
-            try
-            {
-                var gradientsInRange = GradientList
-                    .Where(s => s.Direction == direction)
-                    .Where(s => s.StationName == _state.nextStaName)
-                    .Where(s => s.Distance - offset >= startDist && s.Distance - offset <= endDist)
-                    .Select(s => s.Gradient);
-
-                // 一致したデータがあれば平均を計算
-                if (gradientsInRange.Any()) average = gradientsInRange.Average();
-            }
-            catch
-            {
-                return average;
-            }
-            return average;
+            return (GetDirection(_state) == "上り") ? 1 : 0;
         }
 
         /// <summary>
-        /// 現在位置から絶対位置までの区間における勾配平均値を計算するメソッド
+        /// 進行方向取得メソッド
         /// </summary>
         /// <param name="_state">列車の状態</param>
-        /// <param name="distance">現在位置の距離[m]</param>
-        /// <param name="targetDistance">目標の絶対距離[m]</param>
-        /// <param name="offset">距離オフセット[m]</param>
-        /// <returns>指定区間の勾配平均値</returns>
-        private float CalcAverageGradientToAbsolutePosition(TrainState _state, float distance, float targetDistance, float offset)
+        /// <returns>進行方向</returns>
+        /// <remarks>列車番号が変わったときだけ判定し直す。</remarks>
+        private string GetDirection(TrainState _state)
         {
-            string direction = data.IsEven(int.Parse(Regex.Replace(_state.diaName, @"[^0-9]", ""))) ? "上り" : "下り";
-            float average = 0.0f;
-            float startDist = Math.Max(distance, 0.0f);
-            float endDist = targetDistance;
+            if (string.Equals(_state.diaName, cachedDiaName, StringComparison.Ordinal)) return cachedDirection;
 
-            try
-            {
-                var gradientsInRange = GradientList
-                    .Where(s => s.Direction == direction)
-                    .Where(s => s.StationName == _state.nextStaName)
-                    .Where(s => s.Distance - offset >= endDist && s.Distance - offset <= startDist)
-                    .Select(s => s.Gradient);
-
-                // 一致したデータがあれば平均を計算
-                if (gradientsInRange.Any()) average = gradientsInRange.Average();
-            }
-            catch
-            {
-                return average;
-            }
-            return average;
+            cachedDirection = data.IsEven(int.Parse(NonDigitRegex.Replace(_state.diaName, ""))) ? "上り" : "下り";
+            cachedDiaName = _state.diaName;
+            return cachedDirection;
         }
 
         /// <summary>
@@ -732,7 +662,7 @@ namespace TrainCrewBrakingViewer
         /// <param name="limitDistance">制限速度までの距離[m]</param>
         public void GetTASCLimitSpeed(TrainState _state, float distance, float offset, out float limitSpeed, out float limitDistance)
         {
-            string direction = data.IsEven(int.Parse(Regex.Replace(_state.diaName, @"[^0-9]", ""))) ? "上り" : "下り";
+            string direction = GetDirection(_state);
             int backStaIndex = (_state.nowStaIndex - 1 < 0) ? 0 : _state.nowStaIndex - 1;
             int nowStaIndex = _state.nowStaIndex;
             float strSystemSpeedLimit = (_state.nextSpeedLimit < 0.0f) ? _state.speedLimit : _state.nextSpeedLimit;
@@ -742,11 +672,18 @@ namespace TrainCrewBrakingViewer
             float strlimitDistance = 0.0f;
             try
             {
-                var str = SpeedLimitList
-                    .Where(s => s.Direction == direction)
-                    .Where(s => s.BackStopPosName == _state.stationList[backStaIndex].StopPosName || s.NextStopPosName == _state.stationList[nowStaIndex].StopPosName)
-                    .Where(s => (s.StartPos - offset) > dist && dist >= (s.EndPos - offset))
-                    .FirstOrDefault();
+                string backStopPosName = _state.stationList[backStaIndex].StopPosName;
+                string nowStopPosName = _state.stationList[nowStaIndex].StopPosName;
+
+                SpeedLimitClass str = null;
+                foreach (var speedLimit in SpeedLimitList)
+                {
+                    if (speedLimit.Direction != direction) continue;
+                    if (speedLimit.BackStopPosName != backStopPosName && speedLimit.NextStopPosName != nowStopPosName) continue;
+                    if ((speedLimit.StartPos - offset) <= dist || dist < (speedLimit.EndPos - offset)) continue;
+                    str = speedLimit;
+                    break;
+                }
 
                 //一致したデータがあれば取得
                 if (str != null)
@@ -781,18 +718,20 @@ namespace TrainCrewBrakingViewer
         /// <returns></returns>
         private float GetStopPositionOffset(TrainState _state)
         {
-            string direction = data.IsEven(int.Parse(Regex.Replace(_state.diaName, @"[^0-9]", ""))) ? "上り" : "下り";
+            string direction = GetDirection(_state);
             float offset = 0.0f;
             try
             {
-                var str = StopPositionOffsetList
-                    .Where(s => s.Direction == direction)
-                    .Where(s => s.StationName == _state.nextStaName)
-                    .Select(s => s.Offset[_state.CarStates.Count - 1]);
+                foreach (var stopPositionOffset in StopPositionOffsetList)
+                {
+                    if (stopPositionOffset.Direction != direction) continue;
+                    if (stopPositionOffset.StationName != _state.nextStaName) continue;
 
-                //一致したデータがあれば取得
-                if (str != null && str.Any() && _state.nextStopType.Contains("停車"))
-                    offset = str.FirstOrDefault();
+                    //一致したデータがあれば取得
+                    if (_state.nextStopType.Contains("停車"))
+                        offset = stopPositionOffset.Offset[_state.CarStates.Count - 1];
+                    break;
+                }
             }
             catch
             {
@@ -801,32 +740,6 @@ namespace TrainCrewBrakingViewer
             return offset;
         }
     }
-}
-
-/// <summary>
-/// 勾配情報クラス
-/// </summary>
-public class GradientClass
-{
-    /// <summary>
-    /// 上下
-    /// </summary>
-    public string Direction { get; set; }
-
-    /// <summary>
-    /// 駅名
-    /// </summary>
-    public string StationName { get; set; }
-
-    /// <summary>
-    /// 残り距離(m)
-    /// </summary>
-    public float Distance { get; set; }
-
-    /// <summary>
-    /// 勾配値(‰)
-    /// </summary>
-    public float Gradient { get; set; }
 }
 
 /// <summary>
