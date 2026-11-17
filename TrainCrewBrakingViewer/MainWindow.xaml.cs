@@ -293,11 +293,12 @@ public partial class MainWindow : Window
         // 勾配を織り込み済みのブレーキ曲線を要求する(駅・方向・形式が変わったときだけ読み込まれる)
         int trainModelIndex = (int)_tasc.trainModel;
         int directionKey = _tasc.GetDirectionKey(state);
-        _curveRepository.Request(state.nextStaName, directionKey, trainModelIndex);
+        _curveRepository.Request(state.nextStaName, directionKey, trainModelIndex, state.CarStates);
 
         // 読み込めていればbinのデータを使い、無ければ従来の演算で描く
         var curveSet = _curveRepository.Current;
-        bool useBinCurve = curveSet != null && curveSet.Matches(state.nextStaName, directionKey, trainModelIndex);
+        bool useBinCurve = curveSet != null
+            && curveSet.Matches(state.nextStaName, directionKey, trainModelIndex, BrakingCurveFormation.GetKey(state.CarStates));
 
         // binが使われていないときは理由が分かるように軸ラベルへ出す
         UpdateAxisLabel(useBinCurve ? null : _curveRepository.Status);

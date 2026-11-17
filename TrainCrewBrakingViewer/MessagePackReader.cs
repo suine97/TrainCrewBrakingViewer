@@ -15,6 +15,15 @@ namespace TrainCrewBrakingViewer
         private int position;
 
         /// <summary>
+        /// 読み込み位置(読み飛ばした要素へ後から戻るときに使う)
+        /// </summary>
+        public int Position
+        {
+            get => position;
+            set => position = value;
+        }
+
+        /// <summary>
         /// コンストラクタ
         /// </summary>
         /// <param name="buffer">読み込み対象</param>
@@ -75,6 +84,25 @@ namespace TrainCrewBrakingViewer
                 case 0xd2: return unchecked((int)ReadUInt32());
             }
             throw new FormatException($"整数ではありません (0x{code:x2} at {position - 1})");
+        }
+
+        /// <summary>
+        /// 文字列読み込みメソッド(nil は null を返す)
+        /// </summary>
+        public string ReadString()
+        {
+            byte code = ReadByte();
+            int length;
+            if (code >= 0xa0 && code <= 0xbf) length = code & 0x1f;
+            else if (code == 0xd9) length = ReadByte();
+            else if (code == 0xda) length = ReadUInt16();
+            else if (code == 0xdb) length = checked((int)ReadUInt32());
+            else if (code == 0xc0) return null;
+            else throw new FormatException($"文字列ではありません (0x{code:x2} at {position - 1})");
+
+            string value = System.Text.Encoding.UTF8.GetString(buffer, position, length);
+            position += length;
+            return value;
         }
 
         /// <summary>
