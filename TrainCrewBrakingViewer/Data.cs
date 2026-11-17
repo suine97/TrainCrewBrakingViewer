@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
 
 namespace TrainCrewBrakingViewer
@@ -10,29 +9,6 @@ namespace TrainCrewBrakingViewer
     /// </summary>
     public class Data
     {
-        /// <summary>
-        /// 画像の回転
-        /// </summary>
-        /// <param name="org_bmp"></param>
-        /// <param name="angle"></param>
-        /// <param name="x"></param>
-        /// <param name="y"></param>
-        /// <returns></returns>
-        public Bitmap RotateBitmap(Bitmap org_bmp, float angle, int x, int y)
-        {
-            Bitmap result_bmp = new Bitmap(org_bmp.Width, org_bmp.Height);
-            Graphics g = Graphics.FromImage(result_bmp);
-
-            g.TranslateTransform(-x, -y);
-            g.RotateTransform(angle, System.Drawing.Drawing2D.MatrixOrder.Append);
-            g.TranslateTransform(x, y, System.Drawing.Drawing2D.MatrixOrder.Append);
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear;
-            g.DrawImageUnscaled(org_bmp, 0, 0);
-            g.Dispose();
-
-            return result_bmp;
-        }
-
         /// <summary>
         /// 整数nのd桁目を切り捨てする
         /// </summary>
